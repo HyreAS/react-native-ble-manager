@@ -157,13 +157,23 @@ class BleManager extends NativeEventEmitter {
    *
    * @param peripheralId
    * @param serviceUUIDs [iOS only] optional filter of services to retrieve.
+   * @param characteristicFilters [iOS only] optional array of tuples [serviceUUID, characteristicUUID] to filter specific characteristics.
    * @returns
    */
-  retrieveServices(peripheralId: string, serviceUUIDs: string[] = []) {
+  retrieveServices(
+    peripheralId: string,
+    serviceUUIDs: string[] = [],
+    characteristicFilters: [string, string][] = [],
+    discoverDescriptors: boolean = true,
+    discoverIncludedServices: boolean = true
+  ) {
     return new Promise<PeripheralInfo>((fulfill, reject) => {
       bleManager.retrieveServices(
         peripheralId,
         serviceUUIDs,
+        characteristicFilters,
+        discoverDescriptors,
+        discoverIncludedServices,
         (error: string | null, peripheral: PeripheralInfo) => {
           if (error) {
             reject(error);

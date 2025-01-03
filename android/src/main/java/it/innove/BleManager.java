@@ -488,7 +488,7 @@ class BleManager extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void retrieveServices(String deviceUUID, ReadableArray services, Callback callback) {
+    public void retrieveServices(String deviceUUID, ReadableArray services, ReadableArray characteristicFilters, Boolean discoverDescriptors, Boolean discoverIncludedServices, Callback callback) {
         Log.d(LOG_TAG, "Retrieve services from: " + deviceUUID);
         Peripheral peripheral = peripherals.get(deviceUUID);
         if (peripheral != null) {

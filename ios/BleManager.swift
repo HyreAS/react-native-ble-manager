@@ -34,6 +34,12 @@ class BleManager: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDelegat
     
     private var exactAdvertisingName: [String]
     
+    // Dictionary to store characteristic filters per service UUID
+    private var peripheralCharacteristicFilters: Dictionary<String, Dictionary<CBUUID, Set<CBUUID>>> 
+    
+    private var peripheralDescriptorDiscoveryFlags: Dictionary<String, Bool>
+    private var peripheralIncludedServiceDiscoveryFlags: Dictionary<String, Bool>
+
     static var verboseLogging = false
     
     private override init() {
@@ -52,6 +58,9 @@ class BleManager: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDelegat
         characteristicsLatches = [:]
         exactAdvertisingName = []
         connectedPeripherals = []
+        peripheralCharacteristicFilters = [:]
+        peripheralDescriptorDiscoveryFlags = [:]
+        peripheralIncludedServiceDiscoveryFlags = [:]
         
         super.init()
         
@@ -372,11 +381,35 @@ class BleManager: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDelegat
     
     @objc func retrieveServices(_ peripheralUUID: String,
                                 services: [String],
+                                characteristicFilters: [[String]],
+                                discoverDescriptors: Bool,
+                                discoverIncludedServices: Bool,
                                 callback: @escaping RCTResponseSenderBlock) {
         NSLog("retrieveServices \(services)")
         
         if let peripheral = peripherals[peripheralUUID], peripheral.instance.state == .connected {
+            // Store characteristic filters
+            peripheralCharacteristicFilters[peripheralUUID] = [:]
+            for filter in characteristicFilters {
+                if filter.count != 2 {
+                    let error = "Invalid filter length. Each filter must contain exactly 2 elements: [serviceUUID, characteristicUUID]"
+                    NSLog(error)
+                    callback([error])
+                    return
+                }
+                let serviceUUID = CBUUID(string: filter[0])
+                let characteristicUUID = CBUUID(string: filter[1])
+                if peripheralCharacteristicFilters[peripheralUUID]?[serviceUUID] == nil {
+                    peripheralCharacteristicFilters[peripheralUUID]?[serviceUUID] = Set<CBUUID>()
+                }
+                peripheralCharacteristicFilters[peripheralUUID]?[serviceUUID]?.insert(characteristicUUID)
+            }
+
             insertCallback(callback, intoDictionary: &retrieveServicesCallbacks, withKey: peripheral.instance.uuidAsString())
+            
+            // Store the descriptor discovery flag for this peripheral
+            peripheralDescriptorDiscoveryFlags[peripheralUUID] = discoverDescriptors
+            peripheralIncludedServiceDiscoveryFlags[peripheralUUID] = discoverIncludedServices
             
             var uuids: [CBUUID] = []
             for string in services {
@@ -929,8 +962,19 @@ class BleManager: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDelegat
                 if BleManager.verboseLogging {
                     NSLog("Service \(service.uuid.uuidString) \(service.description)")
                 }
-                peripheral.discoverIncludedServices(nil, for: service) // discover included services
-                peripheral.discoverCharacteristics(nil, for: service) // discover characteristics for service
+
+                if let shouldDiscoverIncludedServices = peripheralIncludedServiceDiscoveryFlags[peripheral.uuidAsString()],
+                   shouldDiscoverIncludedServices {
+                    peripheral.discoverIncludedServices(nil, for: service) // discover included services
+                }
+
+                // Check if we have characteristic filters for this service
+                if let peripheralFilters = peripheralCharacteristicFilters[peripheral.uuidAsString()],
+                   let characteristicUUIDs = peripheralFilters[service.uuid] {
+                    peripheral.discoverCharacteristics(Array(characteristicUUIDs), for: service)
+                } else {
+                    peripheral.discoverCharacteristics(nil, for: service)
+                }
             }
         }
     }
@@ -955,14 +999,32 @@ class BleManager: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDelegat
         if BleManager.verboseLogging {
             NSLog("Characteristics For Service Discover")
         }
+
+        let peripheralUUIDString:String = peripheral.uuidAsString()
         
         var characteristicsForService = Set<CBCharacteristic>()
         characteristicsForService.formUnion(service.characteristics ?? [])
         characteristicsLatches[service.uuid.uuidString] = characteristicsForService
         
-        if let characteristics = service.characteristics {
+        // Only discover descriptors if flag is true
+        if let shouldDiscoverDescriptors = peripheralDescriptorDiscoveryFlags[peripheral.uuidAsString()],
+           shouldDiscoverDescriptors,
+           let characteristics = service.characteristics {
             for characteristic in characteristics {
                 peripheral.discoverDescriptors(for: characteristic)
+            }
+        } else {
+            // Mark service as retrieved since we don't need to retrieve descriptors.
+            // Run callback if all services have been discovered
+            if var servicesLatch = retrieveServicesLatches[peripheralUUIDString] {
+                servicesLatch.remove(service)
+                retrieveServicesLatches[peripheralUUIDString] = servicesLatch
+                if servicesLatch.isEmpty {
+                    // All characteristics and services have been discovered
+                    if let peripheral = peripherals[peripheral.uuidAsString()] {
+                        invokeAndClearDictionary(&retrieveServicesCallbacks, withKey: peripheralUUIDString, usingParameters: [NSNull(), peripheral.servicesInfo()])
+                    }
+                }
             }
         }
     }

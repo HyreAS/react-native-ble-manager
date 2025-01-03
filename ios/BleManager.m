@@ -30,6 +30,9 @@ RCT_EXTERN_METHOD(disconnect:
 RCT_EXTERN_METHOD(retrieveServices:
                   (NSString *)peripheralUUID
                   services:(NSArray<NSString *> *)services
+                  characteristicFilters:(NSArray<NSArray<NSString *>> *)characteristicFilters
+                  discoverDescriptors:(BOOL)discoverDescriptors
+                  discoverIncludedServices:(BOOL)discoverIncludedServices
                   callback:(nonnull RCTResponseSenderBlock)callback)
 
 RCT_EXTERN_METHOD(readRSSI:
